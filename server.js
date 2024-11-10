@@ -14,8 +14,14 @@ dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
+const corsOptions = {
+  origin: 'https://algobank.online/',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true, 
+};
 
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
