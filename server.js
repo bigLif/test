@@ -15,7 +15,7 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 const corsOptions = {
-  origin: 'https://algobank.online/',
+  origin: 'https://client-biglifs-projects.vercel.app/',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true, 
