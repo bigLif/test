@@ -134,7 +134,7 @@ router.get('/verify/:token', async (req, res) => {
     );
 
     // Redirect to frontend with success message
-    res.redirect('https://www.algobank.online/login?verified=true');
+    res.redirect('https://www.algobank.online/');
   } catch (error) {
     console.error('Error in email verification:', error);
     res.status(500).json({ message: 'Server error' });
