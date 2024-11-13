@@ -92,7 +92,7 @@ router.post('/register', async (req, res) => {
     }
 
     // Send verification email
-    const verificationUrl = `http://localhost:5000/api/auth/verify/${verificationToken}`;
+    const verificationUrl = `https://test-ofnz.onrender.com/api/auth/verify/${verificationToken}`;
     await sendEmail(
       email,
       'Verify Your Email',
@@ -134,7 +134,7 @@ router.get('/verify/:token', async (req, res) => {
     );
 
     // Redirect to frontend with success message
-    res.redirect('http://localhost:5173/login?verified=true');
+    res.redirect('https://www.algobank.online/login?verified=true');
   } catch (error) {
     console.error('Error in email verification:', error);
     res.status(500).json({ message: 'Server error' });
@@ -196,7 +196,7 @@ router.post('/resend-verification', async (req, res) => {
     await user.save();
 
     // Send new verification email
-    const verificationUrl = `http://localhost:5000/api/auth/verify/${verificationToken}`;
+    const verificationUrl = `https://test-ofnz.onrender.com/api/auth/verify/${verificationToken}`;
     await sendEmail(
       email,
       'Verify Your Email',
