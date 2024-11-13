@@ -5,14 +5,14 @@ const createTransporter = () => {
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: process.env.SMTP_PORT,
-    secure: false, // Changed to false for TLS
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS
     },
-    tls: {
-      rejectUnauthorized: false // Only for development
-    }
+     secure: true, // Utilisez `true` seulement pour le port 465
+     requireTLS: true, // Tente de mettre à niveau la connexion
+      connectionTimeout: 10000, // Temps en millisecondes (10 secondes)
+  socketTimeout: 10000, // Temps en millisecondes (10 secondes)
   });
 };
 
