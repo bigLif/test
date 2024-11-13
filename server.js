@@ -15,7 +15,7 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 const corsOptions = {
-  origin: 'https://client-biglifs-projects.vercel.app/',
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true, 
