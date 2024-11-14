@@ -37,6 +37,17 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'User already exists' });
     }
 
+    // Validate referral code if provided
+    let referrerTree = null;
+    if (referralCode) {
+      referrerTree = await ReferralTree.findOne({ referralCode: referralCode.toUpperCase() })
+        .populate('userId');
+      
+      if (!referrerTree) {
+        return res.status(400).json({ message: 'Invalid referral code' });
+      }
+    }
+
     // Generate verification token
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const verificationExpires = new Date();
@@ -61,33 +72,26 @@ router.post('/register', async (req, res) => {
     // Create wallet for new user
     await Wallet.create({ userId: user._id, balance: 0 });
 
+    // Create referral tree for new user
+    const userTree = new ReferralTree({ userId: user._id });
+    await userTree.save();
+
     // Handle referral if code exists
-    if (referralCode) {
-      const referrerTree = await ReferralTree.findOne({ referralCode });
-      if (referrerTree) {
-        try {
-          // Add user to referrer's tree
-          await referrerTree.addReferral(user._id);
+    if (referrerTree) {
+      // Add user to referrer's tree
+      referrerTree.referrals.push({
+        userId: user._id,
+        status: 'pending',
+        totalEarnings: 0
+      });
+      await referrerTree.save();
 
-          // Create referral tree for new user
-          const userTree = new ReferralTree({ userId: user._id });
-          await userTree.save();
-
-          // Notify referrer
-          await sendEmail(
-            referrerTree.userId.email,
-            'New Referral Registration',
-            `Someone has registered using your referral code! You'll receive a commission when they make their first deposit.`
-          );
-        } catch (referralError) {
-          console.error('Error creating referral:', referralError);
-          // Continue with registration even if referral creation fails
-        }
-      }
-    } else {
-      // Create referral tree for new user without referrer
-      const userTree = new ReferralTree({ userId: user._id });
-      await userTree.save();
+      // Notify referrer
+      await sendEmail(
+        referrerTree.userId.email,
+        'New Referral Registration',
+        `${name} has registered using your referral code! You'll receive a commission when they make their first deposit.`
+      );
     }
 
     // Send verification email
@@ -106,6 +110,7 @@ router.post('/register', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 // Verify email
 router.get('/verify/:token', async (req, res) => {

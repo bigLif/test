@@ -95,7 +95,10 @@ router.get('/validate/:code', async (req, res) => {
     }).populate('userId', 'name');
 
     if (!referralTree) {
-      return res.status(404).json({ message: 'Invalid referral code' });
+      return res.status(404).json({ 
+        valid: false,
+        message: 'Invalid referral code' 
+      });
     }
 
     res.json({
@@ -116,7 +119,7 @@ export const processReferralCommission = async (userId, depositAmount) => {
 
     const referralTree = await ReferralTree.findOne({ 
       'referrals.userId': userId 
-    });
+    }).populate('userId');
     
     if (!referralTree) return;
 
@@ -152,10 +155,9 @@ export const processReferralCommission = async (userId, depositAmount) => {
     });
 
     // Send email notification
-    const referrer = await User.findById(referralTree.userId);
-    if (referrer?.email) {
+    if (referralTree.userId.email) {
       await sendEmail(
-        referrer.email,
+        referralTree.userId.email,
         'Referral Commission Earned!',
         `Congratulations! You've earned $${commission.toFixed(2)} in referral commission from a referred user's deposit.`
       );
