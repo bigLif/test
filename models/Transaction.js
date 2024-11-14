@@ -27,7 +27,7 @@ const transactionSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['bitcoin', 'usdt', 'balance'],
+    enum: ['bitcoin', 'usdt', 'balance', 'wallet'], // Added 'wallet' as valid payment method
     required: true
   },
   cryptoAmount: {
