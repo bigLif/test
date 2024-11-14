@@ -8,27 +8,36 @@ import { sendEmail } from '../utils/emailService.js';
 
 const router = express.Router();
 
-// Get user's referral code and stats
-router.get('/code', verifyToken, async (req, res) => {
+// Get user's referral stats
+router.get('/stats', verifyToken, async (req, res) => {
   try {
-    let referralTree = await ReferralTree.findOne({ userId: req.user.userId });
+    const referralTree = await ReferralTree.findOne({ userId: req.user.userId })
+      .populate('referrals.userId', 'name email');
     
     if (!referralTree) {
-      referralTree = new ReferralTree({ userId: req.user.userId });
-      await referralTree.save();
+      // Create new referral tree if it doesn't exist
+      const newTree = new ReferralTree({ userId: req.user.userId });
+      await newTree.save();
+      
+      return res.json({
+        code: newTree.referralCode,
+        totalReferrals: 0,
+        activeReferrals: 0,
+        totalEarnings: 0
+      });
     }
 
     const stats = {
       code: referralTree.referralCode,
-      totalReferrals: referralTree.totalReferrals,
-      activeReferrals: referralTree.activeReferrals,
+      totalReferrals: referralTree.referrals.length,
+      activeReferrals: referralTree.referrals.filter(ref => ref.status === 'active').length,
       totalEarnings: referralTree.totalEarnings
     };
 
     res.json(stats);
   } catch (error) {
-    console.error('Error with referral code:', error);
-    res.status(500).json({ message: 'Failed to get referral code' });
+    console.error('Error fetching referral stats:', error);
+    res.status(500).json({ message: 'Failed to fetch referral stats' });
   }
 });
 
@@ -42,7 +51,12 @@ router.get('/tree', verifyToken, async (req, res) => {
       return res.json({ referrals: [] });
     }
 
-    res.json({ referrals: referralTree.referrals });
+    // Sort referrals by date
+    const sortedReferrals = referralTree.referrals.sort((a, b) => 
+      new Date(b.createdAt) - new Date(a.createdAt)
+    );
+
+    res.json({ referrals: sortedReferrals });
   } catch (error) {
     console.error('Error fetching referral tree:', error);
     res.status(500).json({ message: 'Failed to fetch referral tree' });
