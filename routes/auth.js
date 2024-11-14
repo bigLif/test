@@ -42,9 +42,6 @@ router.post('/register', async (req, res) => {
     const verificationExpires = new Date();
     verificationExpires.setHours(verificationExpires.getHours() + 24);
 
-    // Generate unique referral code for new user
-    const newUserReferralCode = await generateUniqueReferralCode();
-
     // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
@@ -56,8 +53,7 @@ router.post('/register', async (req, res) => {
       password: hashedPassword,
       phone,
       verificationToken,
-      verificationExpires,
-      referralCode: newUserReferralCode
+      verificationExpires
     });
 
     await user.save();
@@ -67,44 +63,46 @@ router.post('/register', async (req, res) => {
 
     // Handle referral if code exists
     if (referralCode) {
-      const referrer = await User.findOne({ referralCode });
-      if (referrer) {
+      const referrerTree = await ReferralTree.findOne({ referralCode });
+      if (referrerTree) {
         try {
-          // Create referral record
-          await Referral.create({
-            referrerId: referrer._id,
-            referredId: user._id,
-            code: referralCode,
-            status: 'pending'
-          });
+          // Add user to referrer's tree
+          await referrerTree.addReferral(user._id);
+
+          // Create referral tree for new user
+          const userTree = new ReferralTree({ userId: user._id });
+          await userTree.save();
 
           // Notify referrer
           await sendEmail(
-            referrer.email,
+            referrerTree.userId.email,
             'New Referral Registration',
-            `Someone has registered using your referral code! You'll receive a 3% commission when they make their first deposit.`
+            `Someone has registered using your referral code! You'll receive a commission when they make their first deposit.`
           );
         } catch (referralError) {
           console.error('Error creating referral:', referralError);
           // Continue with registration even if referral creation fails
         }
       }
+    } else {
+      // Create referral tree for new user without referrer
+      const userTree = new ReferralTree({ userId: user._id });
+      await userTree.save();
     }
 
     // Send verification email
-    const verificationUrl = `https://test-ofnz.onrender.com/api/auth/verify/${verificationToken}`;
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
     await sendEmail(
       email,
       'Verify Your Email',
-      `Dear ${name},\n\nWelcome to our platform! Please verify your email by clicking the following link:\n\n${verificationUrl}\n\nThis link will expire in 24 hours.\n\nBest regards,\nYour Platform Team`
+      `Welcome to our platform! Please verify your email by clicking this link: ${verificationUrl}`
     );
 
-    res.status(201).json({ message: 'Registration successful. Please check your email to verify your account.' });
+    res.status(201).json({
+      message: 'Registration successful. Please check your email to verify your account.'
+    });
   } catch (error) {
     console.error('Error in registration:', error);
-    if (error.code === 11000) {
-      return res.status(400).json({ message: 'Registration failed. Please try again.' });
-    }
     res.status(500).json({ message: 'Server error' });
   }
 });

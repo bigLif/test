@@ -1,113 +1,165 @@
 import express from 'express';
 import { verifyToken } from '../middleware/auth.js';
-import Referral from '../models/Referral.js';
+import ReferralTree from '../models/ReferralTree.js';
 import User from '../models/User.js';
 import Wallet from '../models/Wallet.js';
 import Notification from '../models/Notification.js';
 import { sendEmail } from '../utils/emailService.js';
-import crypto from 'crypto';
 
 const router = express.Router();
 
-// Get user's referral code
+// Get user's referral code and stats
 router.get('/code', verifyToken, async (req, res) => {
-    try {
-      const user = await User.findById(req.user.userId);
-      if (!user) {
-        return res.status(404).json({ message: 'User not found' });
-      }
-  
-      if (!user.referralCode) {
-        // Generate a new unique referral code
-        let isUnique = false;
-        let newCode;
-        while (!isUnique) {
-          newCode = crypto.randomBytes(6).toString('hex');
-          const existingUser = await User.findOne({ referralCode: newCode });
-          if (!existingUser) {
-            isUnique = true;
-          }
-        }
-        user.referralCode = newCode;
-        await user.save();
-      }
-  
-      res.json({ code: user.referralCode });
-    } catch (error) {
-      console.error('Error with referral code:', error);
-      res.status(500).json({ message: 'Server error' });
+  try {
+    let referralTree = await ReferralTree.findOne({ userId: req.user.userId });
+    
+    if (!referralTree) {
+      referralTree = new ReferralTree({ userId: req.user.userId });
+      await referralTree.save();
     }
-  });
-  
-  // Get user's referrals
- router.get('/my-referrals', verifyToken, async (req, res) => {
-    try {
-      const referrals = await Referral.find({ referrerId: req.user.userId })
-        .populate('referredId', 'name email')
-        .sort({ createdAt: -1 });
-  
-      // Filter out referrals where referredId is null (deleted users)
-      const validReferrals = referrals.filter(ref => ref.referredId != null);
-  
-      const stats = {
-        totalReferrals: validReferrals.length,
-        activeReferrals: validReferrals.filter(r => r.status === 'completed').length,
-        totalCommission: validReferrals.reduce((sum, ref) => sum + (ref.commission || 0), 0)
-      };
-  
-      res.json({ referrals: validReferrals, stats });
-    } catch (error) {
-      console.error('Error fetching referrals:', error);
-      res.status(500).json({ message: 'Server error' });
+
+    const stats = {
+      code: referralTree.referralCode,
+      totalReferrals: referralTree.totalReferrals,
+      activeReferrals: referralTree.activeReferrals,
+      totalEarnings: referralTree.totalEarnings
+    };
+
+    res.json(stats);
+  } catch (error) {
+    console.error('Error with referral code:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get user's referral tree
+router.get('/tree', verifyToken, async (req, res) => {
+  try {
+    const referralTree = await ReferralTree.findOne({ userId: req.user.userId });
+    if (!referralTree) {
+      return res.status(404).json({ message: 'Referral tree not found' });
     }
-  });
-  
-  // Process referral commission
-  export const processReferralCommission = async (userId, depositAmount) => {
-    try {
-      const referral = await Referral.findOne({ 
-        referredId: userId,
-        status: 'pending'
-      }).populate('referrerId', 'name email');
-  
-      if (!referral) {
-        console.log('No pending referral found for user:', userId);
-        return;
-      }
-  
-      // Calculate commission (3% of deposit)
-      const commission = depositAmount * 0.03;
+
+    const tree = await referralTree.getTree(3); // Get 3 levels deep
+    res.json(tree);
+  } catch (error) {
+    console.error('Error fetching referral tree:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Process referral commission
+export const processReferralCommission = async (userId, depositAmount) => {
+  try {
+    const user = await User.findById(userId);
+    if (!user) return;
+
+    // Find all referral trees that have this user as a referral
+    const referrerTree = await ReferralTree.findOne({
+      'referrals.userId': userId,
+      'referrals.status': 'pending'
+    });
+
+    if (!referrerTree) return;
+
+    // Update referral status to active
+    await referrerTree.updateReferralStatus(userId, 'active');
+
+    // Process multi-level commissions
+    const commissionRates = [0.03, 0.015, 0.0075]; // 3%, 1.5%, 0.75%
+    let currentLevel = 0;
+    let currentTree = referrerTree;
+
+    while (currentLevel < commissionRates.length && currentTree) {
+      const commission = depositAmount * commissionRates[currentLevel];
       
-      // Update referrer's wallet
-      const wallet = await Wallet.findOne({ userId: referral.referrerId._id });
+      // Add earnings to referral tree
+      await currentTree.addEarnings(userId, commission);
+
+      // Update wallet balance
+      const wallet = await Wallet.findOne({ userId: currentTree.userId });
       if (wallet) {
         wallet.balance += commission;
         await wallet.save();
       }
-  
-      // Update referral status and commission
-      referral.status = 'completed';
-      referral.commission = commission;
-      await referral.save();
-  
+
       // Create notification
       await Notification.create({
-        userId: referral.referrerId._id,
-        title: 'Referral Commission Earned!',
-        message: `You've earned $${commission.toFixed(2)} in referral commission from a referred user's first deposit.`,
+        userId: currentTree.userId,
+        title: `Level ${currentLevel + 1} Referral Commission`,
+        message: `You've earned $${commission.toFixed(2)} from a level ${currentLevel + 1} referral deposit.`,
         type: 'system'
       });
-  
-      // Send email
-      if (referral.referrerId.email) {
+
+      // Send email notification
+      const referrer = await User.findById(currentTree.userId);
+      if (referrer?.email) {
         await sendEmail(
-          referral.referrerId.email,
-          'Referral Commission Earned!',
-          `Congratulations! You've earned $${commission.toFixed(2)} in referral commission from a referred user's first deposit.`
+          referrer.email,
+          `Level ${currentLevel + 1} Referral Commission Earned`,
+          `Congratulations! You've earned $${commission.toFixed(2)} from a level ${currentLevel + 1} referral deposit.`
         );
       }
-    } catch (error) {
-      console.error('Error processing referral commission:', error);
+
+      // Get next level referrer
+      currentTree = await ReferralTree.findOne({
+        'referrals.userId': currentTree.userId,
+        'referrals.status': 'active'
+      });
+      currentLevel++;
     }
-  };
+  } catch (error) {
+    console.error('Error processing referral commission:', error);
+  }
+};
+
+// Generate custom referral code
+router.post('/generate-code', verifyToken, async (req, res) => {
+  try {
+    const { customCode } = req.body;
+    
+    if (customCode) {
+      const existing = await ReferralTree.findOne({ referralCode: customCode });
+      if (existing) {
+        return res.status(400).json({ message: 'This referral code is already taken' });
+      }
+    }
+
+    let referralTree = await ReferralTree.findOne({ userId: req.user.userId });
+    if (!referralTree) {
+      referralTree = new ReferralTree({ userId: req.user.userId });
+    }
+
+    if (customCode) {
+      referralTree.referralCode = customCode;
+    }
+    await referralTree.save();
+
+    res.json({ code: referralTree.referralCode });
+  } catch (error) {
+    console.error('Error generating referral code:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Validate referral code
+router.get('/validate/:code', async (req, res) => {
+  try {
+    const referralTree = await ReferralTree.findOne({ referralCode: req.params.code })
+      .populate('userId', 'name');
+
+    if (!referralTree) {
+      return res.status(404).json({ message: 'Invalid referral code' });
+    }
+
+    res.json({
+      valid: true,
+      referrer: referralTree.userId.name
+    });
+  } catch (error) {
+    console.error('Error validating referral code:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 export default router;
