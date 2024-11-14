@@ -17,7 +17,7 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 const corsOptions = {
-  origin: 'https://www.algobank.online/',
+  origin: 'https://www.algobank.online',
   methods: '*',
   allowedHeaders: ['Content-Type', 'Authorization'],
  
