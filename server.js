@@ -16,12 +16,22 @@ dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
-const corsOptions = {
-  origin: 'https://www.algobank.online',
-  methods: '*',
-  allowedHeaders: ['Content-Type', 'Authorization'],
- 
-};
+const allowedOrigins = [
+  'https://www.algobank.online',
+  'https://algobank.online'
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (allowedOrigins.includes(origin) || !origin) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 app.use(cors(corsOptions));
 app.use(express.json());
