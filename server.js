@@ -33,7 +33,10 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-
+app.use((req, res, next) => {
+  res.setHeader("Permissions-Policy", "fullscreen=*; geolocation=*"); // Modifie les permissions nécessaires
+  next();
+});
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
