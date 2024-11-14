@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import crypto from 'crypto';
 
 const referralTreeSchema = new mongoose.Schema({
   userId: {
@@ -9,7 +10,6 @@ const referralTreeSchema = new mongoose.Schema({
   },
   referralCode: {
     type: String,
-    required: true,
     unique: true
   },
   referrals: [{
@@ -53,24 +53,32 @@ const referralTreeSchema = new mongoose.Schema({
   }
 });
 
-// Pre-save middleware to generate unique referral code
-referralTreeSchema.pre('save', async function(next) {
+// Generate unique referral code before saving
+referralTreeSchema.pre('validate', async function(next) {
   if (!this.referralCode) {
-    let isUnique = false;
-    let code;
-    
-    while (!isUnique) {
-      code = Math.random().toString(36).substring(2, 10).toUpperCase();
-      const existing = await this.constructor.findOne({ referralCode: code });
-      if (!existing) {
-        isUnique = true;
-      }
-    }
-    
-    this.referralCode = code;
+    this.referralCode = await this.generateUniqueCode();
   }
   next();
 });
+
+// Method to generate unique referral code
+referralTreeSchema.methods.generateUniqueCode = async function() {
+  let code;
+  let isUnique = false;
+  
+  while (!isUnique) {
+    // Generate 8 character code
+    code = crypto.randomBytes(4).toString('hex').toUpperCase();
+    
+    // Check if code exists
+    const existing = await this.constructor.findOne({ referralCode: code });
+    if (!existing) {
+      isUnique = true;
+    }
+  }
+  
+  return code;
+};
 
 // Method to add new referral
 referralTreeSchema.methods.addReferral = async function(userId) {
@@ -130,5 +138,9 @@ referralTreeSchema.methods.getTree = async function(depth = 3) {
 
   return tree;
 };
+
+// Create indexes
+referralTreeSchema.index({ userId: 1 }, { unique: true });
+referralTreeSchema.index({ referralCode: 1 }, { unique: true });
 
 export default mongoose.model('ReferralTree', referralTreeSchema);

@@ -28,7 +28,7 @@ router.get('/code', verifyToken, async (req, res) => {
     res.json(stats);
   } catch (error) {
     console.error('Error with referral code:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Failed to get referral code' });
   }
 });
 
