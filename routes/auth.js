@@ -7,7 +7,7 @@ import { verifyToken } from '../middleware/auth.js';
 import { sendEmail } from '../utils/emailService.js';
 import Wallet from '../models/Wallet.js';
 import Referral from '../models/Referral.js';
-
+import ReferralTree from '../models/ReferralTree.js';
 const router = express.Router();
 
 // Generate unique referral code
