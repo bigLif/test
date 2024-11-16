@@ -10,7 +10,8 @@ const referralTreeSchema = new mongoose.Schema({
   },
   referralCode: {
     type: String,
-    unique: true
+    unique: true,
+    sparse: true
   },
   referrals: [{
     userId: {
@@ -117,30 +118,8 @@ referralTreeSchema.methods.addEarnings = async function(userId, amount) {
   await this.save();
 };
 
-// Method to get referral tree
-referralTreeSchema.methods.getTree = async function(depth = 3) {
-  const tree = await this.constructor
-    .findById(this._id)
-    .populate({
-      path: 'referrals.userId',
-      select: 'name email'
-    })
-    .lean();
-
-  if (depth > 1) {
-    for (const referral of tree.referrals) {
-      const childTree = await this.constructor.findOne({ userId: referral.userId._id });
-      if (childTree) {
-        referral.children = await childTree.getTree(depth - 1);
-      }
-    }
-  }
-
-  return tree;
-};
-
 // Create indexes
 referralTreeSchema.index({ userId: 1 }, { unique: true });
-referralTreeSchema.index({ referralCode: 1 }, { unique: true });
+referralTreeSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
 
 export default mongoose.model('ReferralTree', referralTreeSchema);

@@ -40,9 +40,7 @@ router.post('/register', async (req, res) => {
     // Validate referral code if provided
     let referrerTree = null;
     if (referralCode) {
-      referrerTree = await ReferralTree.findOne({ referralCode: referralCode.toUpperCase() })
-        .populate('userId');
-      
+      referrerTree = await ReferralTree.findOne({ referralCode: referralCode.toUpperCase() });
       if (!referrerTree) {
         return res.status(400).json({ message: 'Invalid referral code' });
       }
@@ -78,20 +76,29 @@ router.post('/register', async (req, res) => {
 
     // Handle referral if code exists
     if (referrerTree) {
-      // Add user to referrer's tree
-      referrerTree.referrals.push({
-        userId: user._id,
-        status: 'pending',
-        totalEarnings: 0
-      });
-      await referrerTree.save();
+      try {
+        // Add user to referrer's tree
+        referrerTree.referrals.push({
+          userId: user._id,
+          status: 'pending',
+          totalEarnings: 0,
+          createdAt: new Date()
+        });
+        await referrerTree.save();
 
-      // Notify referrer
-      await sendEmail(
-        referrerTree.userId.email,
-        'New Referral Registration',
-        `${name} has registered using your referral code! You'll receive a commission when they make their first deposit.`
-      );
+        // Notify referrer
+        const referrer = await User.findById(referrerTree.userId);
+        if (referrer) {
+          await sendEmail(
+            referrer.email,
+            'New Referral Registration',
+            `${name} has registered using your referral code! You'll receive a commission when they make their first deposit.`
+          );
+        }
+      } catch (error) {
+        console.error('Error processing referral:', error);
+        // Don't fail the registration if referral processing fails
+      }
     }
 
     // Send verification email
@@ -107,10 +114,56 @@ router.post('/register', async (req, res) => {
     });
   } catch (error) {
     console.error('Error in registration:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error during registration' });
   }
 });
 
+// Login
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Validate user exists
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    // Check password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    // Check if email is verified
+    if (!user.isVerified) {
+      return res.status(400).json({ 
+        message: 'Please verify your email before logging in',
+        needsVerification: true
+      });
+    }
+
+    // Create and sign JWT
+    const token = jwt.sign(
+      { userId: user._id, isAdmin: user.isAdmin },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      token,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        isAdmin: user.isAdmin
+      }
+    });
+  } catch (error) {
+    console.error('Error in login:', error);
+    res.status(500).json({ message: 'Server error during login' });
+  }
+});
 
 // Verify email
 router.get('/verify/:token', async (req, res) => {
@@ -129,49 +182,11 @@ router.get('/verify/:token', async (req, res) => {
     user.verificationExpires = undefined;
     await user.save();
 
-    // Send welcome email
-    await sendEmail(
-      user.email,
-      'Welcome to Our Platform',
-      `Dear ${user.name},\n\nThank you for verifying your email address. Your account is now fully activated and you can start using our platform.\n\nBest regards,\nYour Platform Team`
-    );
-
     // Redirect to frontend with success message
-    res.redirect('https://www.algobank.online/');
+    res.redirect(`${process.env.FRONTEND_URL}/login?verified=true`);
   } catch (error) {
     console.error('Error in email verification:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// Login
-router.post('/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    // Check if user exists
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: 'Invalid credentials' });
-    }
-
-    // Check if email is verified
-    if (!user.isVerified) {
-      return res.status(400).json({ message: 'Please verify your email before logging in' });
-    }
-
-    // Check password
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: 'Invalid credentials' });
-    }
-
-    // Create and return JWT
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    res.json({ token });
-  } catch (error) {
-    console.error('Error in login:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error during verification' });
   }
 });
 
@@ -199,19 +214,20 @@ router.post('/resend-verification', async (req, res) => {
     await user.save();
 
     // Send new verification email
-    const verificationUrl = `https://test-ofnz.onrender.com/api/auth/verify/${verificationToken}`;
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
     await sendEmail(
       email,
       'Verify Your Email',
-      `Dear ${user.name},\n\nPlease verify your email by clicking the following link:\n\n${verificationUrl}\n\nThis link will expire in 24 hours.\n\nBest regards,\nYour Platform Team`
+      `Please verify your email by clicking this link: ${verificationUrl}`
     );
 
-    res.json({ message: 'Verification email has been resent' });
+    res.json({ message: 'Verification email sent successfully' });
   } catch (error) {
     console.error('Error resending verification:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error while resending verification email' });
   }
 });
+
 
 // Get current user
 router.get('/me', verifyToken, async (req, res) => {
