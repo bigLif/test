@@ -15,56 +15,45 @@ const router = express.Router();
 // Get wallet balance and gains
 router.get('/balance', verifyToken, async (req, res) => {
   try {
-    let wallet = await Wallet.findOne({ userId: req.user.userId });
-    let gains = await Gains.findOne({ userId: req.user.userId });
-    
+    const [wallet, gains] = await Promise.all([
+      Wallet.findOne({ userId: req.user.userId }),
+      Gains.findOne({ userId: req.user.userId })
+    ]);
+
     if (!wallet) {
-      wallet = await Wallet.create({
-        userId: req.user.userId,
-        balance: 0
-      });
+      return res.status(404).json({ message: 'Wallet not found' });
     }
 
-    if (!gains) {
-      gains = await Gains.create({
-        userId: req.user.userId,
-        amount: 0
-      });
-    }
-
-    // Update investment gains
-    const investments = await Investment.find({ userId: req.user.userId });
-    let totalNewGains = 0;
-
-    for (const investment of investments) {
-      const now = new Date();
-      const lastUpdate = new Date(investment.lastUpdated);
-      const daysSinceLastUpdate = Math.floor((now - lastUpdate) / (1000 * 60 * 60 * 24));
-
-      if (daysSinceLastUpdate > 0) {
-        // Calculate daily gains (1% per day)
-        const dailyGainRate = 0.01; // 1%
-        const gainAmount = investment.amount * dailyGainRate * daysSinceLastUpdate;
-        totalNewGains += gainAmount;
-
-        // Update investment
-        investment.currentValue += gainAmount;
-        investment.lastUpdated = now;
-        await investment.save();
-      }
-    }
-
-    if (totalNewGains > 0) {
-      gains.amount += totalNewGains;
-      await gains.save();
-    }
-
-    res.json({ 
+    res.json({
       balance: wallet.balance,
-      gains: gains.amount
+      gains: gains ? gains.amount : 0
     });
   } catch (error) {
     console.error('Error fetching balance:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Update gains
+router.post('/update-gains', verifyToken, async (req, res) => {
+  try {
+    // Find or create gains document
+    let gains = await Gains.findOne({ userId: req.user.userId });
+    if (!gains) {
+      gains = new Gains({ userId: req.user.userId });
+    }
+
+    // Calculate new gains (simplified example)
+    const investments = await Investment.find({ userId: req.user.userId });
+    const totalGains = investments.reduce((sum, inv) => sum + (inv.currentValue - inv.amount), 0);
+
+    gains.amount = totalGains;
+    gains.lastUpdated = new Date();
+    await gains.save();
+
+    res.json({ gains: totalGains });
+  } catch (error) {
+    console.error('Error updating gains:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
