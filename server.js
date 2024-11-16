@@ -32,6 +32,12 @@ app.use(cors({
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*'); // Ou spécifie ton domaine
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  next();
+});
 
 app.use((req, res, next) => {
   res.setHeader("Permissions-Policy", "fullscreen=*; geolocation=*"); // Modifie les permissions nécessaires
