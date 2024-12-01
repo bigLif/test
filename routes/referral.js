@@ -71,20 +71,25 @@ router.get('/tree', verifyToken, async (req, res) => {
     );
 
     if (!referralTree) {
+      console.log(`No referral tree found for user: ${req.user.userId}`);
       return res.json({ referrals: [] });
     }
 
-    const sortedReferrals = referralTree.referrals.sort((a, b) =>
-      new Date(b.createdAt) - new Date(a.createdAt)
-    );
-
-    const referrals = sortedReferrals.map(ref => ({
-      name: ref.userId.name,
-      email: ref.userId.email,
-      status: ref.status,
-      totalEarnings: ref.totalEarnings.toFixed(2),
-      createdAt: ref.createdAt
-    }));
+    const referrals = referralTree.referrals
+      .filter(ref => {
+        if (!ref.userId) {
+          console.warn(`Invalid referral found in tree for user: ${req.user.userId}`);
+          return false; // Supprimez les entrées invalides
+        }
+        return true;
+      })
+      .map(ref => ({
+        name: ref.userId.name || 'Unknown User',
+        email: ref.userId.email || 'N/A',
+        status: ref.status,
+        totalEarnings: (ref.totalEarnings || 0).toFixed(2),
+        createdAt: ref.createdAt
+      }));
 
     res.json({ referrals });
   } catch (error) {
