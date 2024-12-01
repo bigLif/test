@@ -1,20 +1,82 @@
+
 import express from 'express';
 import { verifyToken } from '../middleware/auth.js';
 import ReferralTree from '../models/ReferralTree.js';
 import User from '../models/User.js';
 import Wallet from '../models/Wallet.js';
-import Transaction from '../models/Transaction.js';
 import Notification from '../models/Notification.js';
-import { sendEmail } from '../utils/emailService.js';
 
 const router = express.Router();
 
+// Helper function to get referral link
+const getReferralLink = (code) => `${process.env.FRONTEND_URL}/register?ref=${code}`;
+
 /**
- * Génère ou récupère le code de parrainage pour l'utilisateur
+ * Récupère les statistiques de parrainage
+ */
+router.get('/stats', verifyToken, async (req, res) => {
+  try {
+    const referralTree = await ReferralTree.findOne({ userId: req.user.userId });
+
+    if (!referralTree) {
+      return res.json({
+        code: null,
+        totalReferrals: 0,
+        activeReferrals: 0,
+        totalEarnings: 0,
+      });
+    }
+
+    const stats = {
+      code: referralTree.referralCode,
+      totalReferrals: referralTree.referrals.length,
+      activeReferrals: referralTree.referrals.filter((ref) => ref.status === 'active').length,
+      totalEarnings: referralTree.totalEarnings.toFixed(2),
+    };
+
+    res.json(stats);
+  } catch (error) {
+    console.error('Error fetching referral stats:', error);
+    res.status(500).json({ message: 'Failed to fetch referral stats' });
+  }
+});
+
+/**
+ * Récupère l'arbre de parrainage
+ */
+router.get('/tree', verifyToken, async (req, res) => {
+  try {
+    const referralTree = await ReferralTree.findOne({ userId: req.user.userId }).populate(
+      'referrals.userId',
+      'name email'
+    );
+
+    if (!referralTree) {
+      return res.json({ referrals: [] });
+    }
+
+    const referrals = referralTree.referrals.map((ref) => ({
+      name: ref.userId?.name || 'Unknown User',
+      email: ref.userId?.email || 'N/A',
+      status: ref.status,
+      totalEarnings: ref.totalEarnings.toFixed(2),
+      createdAt: ref.createdAt,
+    }));
+
+    res.json({ referrals });
+  } catch (error) {
+    console.error('Error fetching referral tree:', error);
+    res.status(500).json({ message: 'Failed to fetch referral tree' });
+  }
+});
+
+/**
+ * Génère un code de parrainage pour l'utilisateur
  */
 router.get('/generate-code', verifyToken, async (req, res) => {
   try {
     let referralTree = await ReferralTree.findOne({ userId: req.user.userId });
+
     if (referralTree) {
       return res.json({ code: referralTree.referralCode });
     }
@@ -30,73 +92,7 @@ router.get('/generate-code', verifyToken, async (req, res) => {
   }
 });
 
-/**
- * Statistiques de parrainage de l'utilisateur
- */
-router.get('/stats', verifyToken, async (req, res) => {
-  try {
-    const referralTree = await ReferralTree.findOne({ userId: req.user.userId });
 
-    if (!referralTree) {
-      return res.json({
-        code: null,
-        totalReferrals: 0,
-        activeReferrals: 0,
-        totalEarnings: 0
-      });
-    }
-
-    const stats = {
-      code: referralTree.referralCode,
-      totalReferrals: referralTree.referrals.length,
-      activeReferrals: referralTree.referrals.filter(ref => ref.status === 'active').length,
-      totalEarnings: referralTree.totalEarnings.toFixed(2)
-    };
-
-    res.json(stats);
-  } catch (error) {
-    console.error('Error fetching referral stats:', error);
-    res.status(500).json({ message: 'Failed to fetch referral stats' });
-  }
-});
-
-/**
- * Arbre de parrainage de l'utilisateur
- */
-router.get('/tree', verifyToken, async (req, res) => {
-  try {
-    const referralTree = await ReferralTree.findOne({ userId: req.user.userId }).populate(
-      'referrals.userId',
-      'name email'
-    );
-
-    if (!referralTree) {
-      console.log(`No referral tree found for user: ${req.user.userId}`);
-      return res.json({ referrals: [] });
-    }
-
-    const referrals = referralTree.referrals
-      .filter(ref => {
-        if (!ref.userId) {
-          console.warn(`Invalid referral found in tree for user: ${req.user.userId}`);
-          return false; // Supprimez les entrées invalides
-        }
-        return true;
-      })
-      .map(ref => ({
-        name: ref.userId.name || 'Unknown User',
-        email: ref.userId.email || 'N/A',
-        status: ref.status,
-        totalEarnings: (ref.totalEarnings || 0).toFixed(2),
-        createdAt: ref.createdAt
-      }));
-
-    res.json({ referrals });
-  } catch (error) {
-    console.error('Error fetching referral tree:', error);
-    res.status(500).json({ message: 'Failed to fetch referral tree' });
-  }
-});
 
 /**
  * Confirme un dépôt et traite la commission de parrainage
