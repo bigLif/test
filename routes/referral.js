@@ -3,182 +3,128 @@ import { verifyToken } from '../middleware/auth.js';
 import ReferralTree from '../models/ReferralTree.js';
 import User from '../models/User.js';
 import Wallet from '../models/Wallet.js';
+import Transaction from '../models/Transaction.js';
 import Notification from '../models/Notification.js';
 import { sendEmail } from '../utils/emailService.js';
 
 const router = express.Router();
 
-// Get user's referral stats
-router.get('/stats', verifyToken, async (req, res) => {
+/**
+ * Crée un code de parrainage pour un utilisateur
+ */
+router.get('/generate-code', verifyToken, async (req, res) => {
   try {
-    const referralTree = await ReferralTree.findOne({ userId: req.user.userId })
-      .populate('referrals.userId', 'name email');
-    
-    if (!referralTree) {
-      // Create new referral tree if it doesn't exist
-      const newTree = new ReferralTree({ userId: req.user.userId });
-      await newTree.save();
-      
-      return res.json({
-        code: newTree.referralCode,
-        totalReferrals: 0,
-        activeReferrals: 0,
-        totalEarnings: 0
-      });
+    // Vérifiez si l'utilisateur a déjà un code
+    let referralTree = await ReferralTree.findOne({ userId: req.user.userId });
+    if (referralTree) {
+      return res.json({ code: referralTree.referralCode });
     }
 
-    const stats = {
-      code: referralTree.referralCode,
-      totalReferrals: referralTree.referrals.length,
-      activeReferrals: referralTree.referrals.filter(ref => ref.status === 'active').length,
-      totalEarnings: referralTree.totalEarnings
-    };
-
-    res.json(stats);
-  } catch (error) {
-    console.error('Error fetching referral stats:', error);
-    res.status(500).json({ message: 'Failed to fetch referral stats' });
-  }
-});
-
-// Get referral tree
-router.get('/tree', verifyToken, async (req, res) => {
-  try {
-    const referralTree = await ReferralTree.findOne({ userId: req.user.userId })
-      .populate('referrals.userId', 'name email');
-
-    if (!referralTree) {
-      return res.json({ referrals: [] });
-    }
-
-    // Sort referrals by date
-    const sortedReferrals = referralTree.referrals.sort((a, b) => 
-      new Date(b.createdAt) - new Date(a.createdAt)
-    );
-
-    res.json({ referrals: sortedReferrals });
-  } catch (error) {
-    console.error('Error fetching referral tree:', error);
-    res.status(500).json({ message: 'Failed to fetch referral tree' });
-  }
-});
-
-// Generate custom referral code
-router.post('/generate-code', verifyToken, async (req, res) => {
-  try {
-    const { customCode } = req.body;
-    
-    if (!customCode) {
-      return res.status(400).json({ message: 'Custom code is required' });
-    }
-
-    // Validate custom code format
-    if (!/^[A-Za-z0-9]{4,12}$/.test(customCode)) {
-      return res.status(400).json({ 
-        message: 'Custom code must be 4-12 characters long and contain only letters and numbers' 
-      });
-    }
-
-    // Check if code is already taken
-    const existing = await ReferralTree.findOne({ referralCode: customCode.toUpperCase() });
-    if (existing) {
-      return res.status(400).json({ message: 'This referral code is already taken' });
-    }
-
-    // Update user's referral code
-    const referralTree = await ReferralTree.findOne({ userId: req.user.userId });
-    if (!referralTree) {
-      return res.status(404).json({ message: 'Referral tree not found' });
-    }
-
-    referralTree.referralCode = customCode.toUpperCase();
+    // Génère un nouveau code unique
+    const code = `REF-${req.user.userId.slice(-6).toUpperCase()}`;
+    referralTree = new ReferralTree({ userId: req.user.userId, referralCode: code });
     await referralTree.save();
 
-    res.json({ code: referralTree.referralCode });
+    res.json({ code });
   } catch (error) {
-    console.error('Error generating custom code:', error);
-    res.status(500).json({ message: 'Failed to generate custom code' });
+    console.error('Error generating referral code:', error);
+    res.status(500).json({ message: 'Failed to generate referral code' });
   }
 });
 
-// Validate referral code
-router.get('/validate/:code', async (req, res) => {
+/**
+ * Inscription avec un code de parrainage
+ */
+router.post('/register/:referralCode', async (req, res) => {
   try {
-    const referralTree = await ReferralTree.findOne({ 
-      referralCode: req.params.code.toUpperCase() 
-    }).populate('userId', 'name');
+    const { name, email, password, phone } = req.body;
+    const { referralCode } = req.params;
 
-    if (!referralTree) {
-      return res.status(404).json({ 
-        valid: false,
-        message: 'Invalid referral code' 
-      });
+    // Vérifiez si le code de parrainage existe
+    const referrerTree = await ReferralTree.findOne({ referralCode });
+    if (!referrerTree) {
+      return res.status(400).json({ message: 'Invalid referral code' });
     }
 
-    res.json({
-      valid: true,
-      referrer: referralTree.userId.name
-    });
+    // Crée un nouvel utilisateur
+    const user = new User({ name, email, password, phone });
+    await user.save();
+
+    // Ajoutez l'utilisateur au réseau de parrainage
+    referrerTree.referrals.push({ userId: user._id, status: 'pending', totalEarnings: 0 });
+    await referrerTree.save();
+
+    // Crée un portefeuille pour le nouvel utilisateur
+    await Wallet.create({ userId: user._id, balance: 0 });
+
+    res.status(201).json({ message: 'Registration successful', referralCode });
   } catch (error) {
-    console.error('Error validating referral code:', error);
-    res.status(500).json({ message: 'Failed to validate referral code' });
+    console.error('Error during registration:', error);
+    res.status(500).json({ message: 'Server error during registration' });
   }
 });
 
-// Process referral commission
-export const processReferralCommission = async (userId, depositAmount) => {
+/**
+ * Ajoute une commission de parrainage après confirmation d’un dépôt
+ */
+router.post('/confirm-deposit', verifyToken, async (req, res) => {
   try {
-    const user = await User.findById(userId);
-    if (!user) return;
+    const { userId, depositAmount } = req.body;
 
-    const referralTree = await ReferralTree.findOne({ 
-      'referrals.userId': userId 
-    }).populate('userId');
-    
-    if (!referralTree) return;
-
-    const referral = referralTree.referrals.find(ref => 
-      ref.userId.toString() === userId.toString()
-    );
-
-    if (!referral || referral.status === 'active') return;
-
-    // Calculate commission (3% of deposit)
-    const commission = depositAmount * 0.03;
-
-    // Update referrer's wallet
-    const wallet = await Wallet.findOne({ userId: referralTree.userId });
-    if (wallet) {
-      wallet.balance += commission;
-      await wallet.save();
+    // Confirmez que la transaction est un dépôt
+    const transaction = await Transaction.findOne({ userId, type: 'deposit', status: 'pending' });
+    if (!transaction) {
+      return res.status(404).json({ message: 'No pending deposit found' });
     }
 
-    // Update referral status and earnings
-    referral.status = 'active';
-    referral.totalEarnings += commission;
-    referralTree.totalEarnings += commission;
-    referralTree.activeReferrals += 1;
-    await referralTree.save();
+    transaction.status = 'completed';
+    await transaction.save();
 
-    // Create notification
-    await Notification.create({
-      userId: referralTree.userId,
-      title: 'Referral Commission Earned!',
-      message: `You've earned $${commission.toFixed(2)} in referral commission from a referred user's deposit.`,
-      type: 'system'
-    });
+    // Ajoutez une commission de 3% au parrain
+    const referralTree = await ReferralTree.findOne({ 'referrals.userId': userId });
+    if (referralTree) {
+      const commission = depositAmount * 0.03;
+      const wallet = await Wallet.findOne({ userId: referralTree.userId });
 
-    // Send email notification
-    if (referralTree.userId.email) {
-      await sendEmail(
-        referralTree.userId.email,
-        'Referral Commission Earned!',
-        `Congratulations! You've earned $${commission.toFixed(2)} in referral commission from a referred user's deposit.`
-      );
+      if (wallet) {
+        wallet.balance += commission;
+        await wallet.save();
+
+        // Mettez à jour les gains dans le réseau de parrainage
+        const referral = referralTree.referrals.find(ref => ref.userId.toString() === userId);
+        if (referral) {
+          referral.status = 'active';
+          referral.totalEarnings += commission;
+        }
+        referralTree.totalEarnings += commission;
+        referralTree.activeReferrals += 1;
+        await referralTree.save();
+
+        // Envoyez une notification au parrain
+        await Notification.create({
+          userId: referralTree.userId,
+          title: 'Referral Commission Earned!',
+          message: `You earned $${commission.toFixed(2)} from your referral's deposit.`,
+          type: 'system'
+        });
+
+        // Envoyez un email de notification
+        const referrer = await User.findById(referralTree.userId);
+        if (referrer) {
+          await sendEmail(
+            referrer.email,
+            'Referral Commission Earned!',
+            `Congratulations! You've earned $${commission.toFixed(2)} from a referral's deposit.`
+          );
+        }
+      }
     }
+
+    res.json({ message: 'Deposit confirmed and referral commission processed' });
   } catch (error) {
-    console.error('Error processing referral commission:', error);
+    console.error('Error confirming deposit:', error);
+    res.status(500).json({ message: 'Failed to confirm deposit' });
   }
-};
+});
 
 export default router;
