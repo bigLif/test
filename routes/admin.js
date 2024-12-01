@@ -308,9 +308,11 @@ router.delete('/users/:id', verifyAdmin, async (req, res) => {
 router.patch('/transaction/:id', verifyAdmin, async (req, res) => {
   try {
     const { status, txHash } = req.body;
-    const transaction = await Transaction.findById(req.params.id);
+    console.log(`Updating transaction: ${req.params.id}, Status: ${status}, TxHash: ${txHash}`); // Log
 
+    const transaction = await Transaction.findById(req.params.id);
     if (!transaction) {
+      console.error(`Transaction not found for ID: ${req.params.id}`); // Log
       return res.status(404).json({ message: 'Transaction not found' });
     }
 
@@ -320,56 +322,25 @@ router.patch('/transaction/:id', verifyAdmin, async (req, res) => {
       transaction.txHash = txHash;
     }
     await transaction.save();
+    console.log(`Transaction updated successfully: ${transaction}`); // Log
 
-    const user = await User.findById(transaction.userId);
-
-    if (status === 'completed' && oldStatus !== 'completed') {
-      if (transaction.type === 'deposit') {
-        // Update wallet balance
-        const wallet = await Wallet.findOne({ userId: transaction.userId });
-        if (wallet) {
-          wallet.balance += transaction.amount;
-          await wallet.save();
-        }
-
-        // Check if this is the first deposit and process referral
-        const previousDeposits = await Transaction.find({
-          userId: transaction.userId,
-          type: 'deposit',
-          status: 'completed',
-          _id: { $ne: transaction._id }
-        });
-
-        if (previousDeposits.length === 0) {
-          // This is the first deposit, process referral commission
-          await processReferralCommission(transaction.userId, transaction.amount);
-        }
-
-        // Create notification
-        await Notification.create({
-          userId: transaction.userId,
-          title: 'Deposit Approved',
-          message: `Your deposit of $${transaction.amount} has been approved and added to your wallet.`,
-          type: 'deposit'
-        });
-
-        // Send email
-        if (user) {
-          await sendEmail(
-            user.email,
-            'Deposit Approved',
-            `Dear ${user.name},\n\nYour deposit of $${transaction.amount} has been approved and added to your wallet.\n\nThank you for using our platform!`
-          );
-        }
+    if (status === 'completed' && oldStatus !== 'completed' && transaction.type === 'deposit') {
+      const wallet = await Wallet.findOne({ userId: transaction.userId });
+      if (wallet) {
+        wallet.balance += transaction.amount;
+        await wallet.save();
+        console.log(`Wallet updated for user ${transaction.userId}, New Balance: ${wallet.balance}`); // Log
+      } else {
+        console.error(`Wallet not found for user: ${transaction.userId}`); // Log
       }
     }
-
     res.json(transaction);
   } catch (error) {
-    console.error('Error updating transaction:', error);
+    console.error(`Error updating transaction: ${error.message}`); // Log
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 
 

@@ -410,28 +410,22 @@ router.post('/invest', verifyToken, async (req, res) => {
 
   try {
     const { productId, amount } = req.body;
+    console.log(`Investment initiated by user ${req.user.userId}, Product: ${productId}, Amount: ${amount}`); // Log
 
-    // Validate minimum investment amount
     if (amount < 49) {
       throw new Error('Minimum investment amount is $100');
     }
 
-    // Check user's wallet balance
     const wallet = await Wallet.findOne({ userId: req.user.userId });
     if (!wallet || wallet.balance < amount) {
+      console.error(`Insufficient funds for user ${req.user.userId}. Wallet Balance: ${wallet?.balance}`); // Log
       throw new Error('Insufficient funds');
     }
 
-    // Create transaction record
-    const transaction = new Transaction({
-      userId: req.user.userId,
-      type: 'investment',
-      amount,
-      status: 'completed',
-      paymentMethod: 'balance'
-    });
+    wallet.balance -= amount;
+    await wallet.save({ session });
+    console.log(`Wallet balance updated for user ${req.user.userId}. New Balance: ${wallet.balance}`); // Log
 
-    // Create investment record
     const investment = new Investment({
       userId: req.user.userId,
       productId,
@@ -439,29 +433,14 @@ router.post('/invest', verifyToken, async (req, res) => {
       currentValue: amount
     });
 
-    // Update wallet balance
-    wallet.balance -= amount;
-
-    // Save all changes
-    await Promise.all([
-      transaction.save({ session }),
-      investment.save({ session }),
-      wallet.save({ session })
-    ]);
-
-    // Create notification
-    await Notification.create([{
-      userId: req.user.userId,
-      title: 'Investment Created',
-      message: `Your investment of $${amount} has been created successfully.`,
-      type: 'investment'
-    }], { session });
+    await investment.save({ session });
+    console.log(`Investment created for user ${req.user.userId}: ${investment}`); // Log
 
     await session.commitTransaction();
     res.status(201).json({ message: 'Investment created successfully' });
   } catch (error) {
     await session.abortTransaction();
-    console.error('Error creating investment:', error);
+    console.error(`Error creating investment: ${error.message}`); // Log
     res.status(400).json({ message: error.message || 'Failed to create investment' });
   } finally {
     session.endSession();
