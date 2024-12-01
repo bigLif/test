@@ -412,8 +412,8 @@ router.post('/invest', verifyToken, async (req, res) => {
     const { productId, amount } = req.body;
     console.log(`Investment initiated by user ${req.user.userId}, Product: ${productId}, Amount: ${amount}`); // Log
 
-    if (amount < 49) {
-      throw new Error('Minimum investment amount is $100');
+    if (amount < 9) {
+      throw new Error('Minimum investment amount is $9');
     }
 
     const wallet = await Wallet.findOne({ userId: req.user.userId });
